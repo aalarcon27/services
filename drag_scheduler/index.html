@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 10px;
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    font-size: 14px; color: #1f2933;
+  }
+  #app { display: flex; gap: 16px; align-items: flex-start; }
+  #personal-panel {
+    flex: 0 0 170px; min-width: 150px;
+  }
+  #personal-panel h4 { margin: 0 0 8px 0; font-size: 13px; color: #52606d; }
+  .person-chip {
+    background: #4C6EF5; color: #fff; padding: 8px 10px; border-radius: 8px;
+    margin-bottom: 6px; cursor: grab; font-size: 13px; user-select: none;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  }
+  .person-chip:active { cursor: grabbing; opacity: 0.8; }
+  .person-chip.fc-event { display: block; }
+  #calendar-panel { flex: 1 1 auto; min-width: 0; }
+  .fc-event { cursor: pointer; }
+  #hint { font-size: 12px; color: #7b8794; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="personal-panel">
+    <h4>Arrastra al calendario</h4>
+    <div id="personal-list"></div>
+    <div id="hint">Arrastra un nombre a un día para asignarlo. Arrastra un evento ya puesto para cambiarlo de fecha.</div>
+  </div>
+  <div id="calendar-panel">
+    <div id="calendar"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.21/index.global.min.js"></script>
+<script>
+function sendToStreamlit(type, data) {
+  var payload = Object.assign({ isStreamlitMessage: true, type: type }, data || {});
+  window.parent.postMessage(payload, "*");
+}
+function setFrameHeight(h) { sendToStreamlit("streamlit:setFrameHeight", { height: h }); }
+function setComponentValue(value) { sendToStreamlit("streamlit:setComponentValue", { value: value, dataType: "json" }); }
+
+var calendarInstance = null;
+var draggableInstance = null;
+var colorActual = "#4C6EF5";
+
+function render(args) {
+  colorActual = args.color || "#4C6EF5";
+
+  var personalDiv = document.getElementById("personal-list");
+  personalDiv.innerHTML = "";
+  (args.personal || []).forEach(function (p) {
+    var chip = document.createElement("div");
+    chip.className = "person-chip";
+    chip.setAttribute("data-id", p.id);
+    chip.style.backgroundColor = colorActual;
+    chip.innerText = p.nombre;
+    personalDiv.appendChild(chip);
+  });
+
+  if (draggableInstance) {
+    draggableInstance.destroy();
+  }
+  draggableInstance = new FullCalendar.Draggable(personalDiv, {
+    itemSelector: ".person-chip",
+    eventData: function (el) {
+      return {
+        title: el.innerText,
+        extendedProps: { personId: parseInt(el.getAttribute("data-id"), 10) },
+      };
+    },
+  });
+
+  var calendarEl = document.getElementById("calendar");
+  if (calendarInstance) {
+    calendarInstance.destroy();
+  }
+  calendarInstance = new FullCalendar.Calendar(calendarEl, {
+    initialView: "dayGridMonth",
+    initialDate: args.fechaInicial || undefined,
+    height: 600,
+    droppable: true,
+    editable: true,
+    headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,timeGridWeek" },
+    events: (args.eventos || []).map(function (e) {
+      return Object.assign({}, e, {
+        backgroundColor: e.color || colorActual,
+        borderColor: e.color || colorActual,
+      });
+    }),
+    eventReceive: function (info) {
+      var personId = info.event.extendedProps.personId;
+      var fecha = info.event.startStr.slice(0, 10);
+      info.event.remove();
+      setComponentValue({ accion: "asignar", personId: personId, fecha: fecha, ts: Date.now() });
+    },
+    eventDrop: function (info) {
+      var fecha = info.event.startStr.slice(0, 10);
+      setComponentValue({ accion: "mover", eventId: info.event.id, fecha: fecha, ts: Date.now() });
+    },
+  });
+  calendarInstance.render();
+  setFrameHeight(650);
+}
+
+window.addEventListener("message", function (event) {
+  if (!event.data || event.data.type !== "streamlit:render") return;
+  render(event.data.args || {});
+});
+
+sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+setFrameHeight(650);
+</script>
+</body>
+</html>

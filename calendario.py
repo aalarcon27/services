@@ -11,7 +11,7 @@ import datetime
 from streamlit_calendar import calendar
 
 
-def _sumar_dia(fecha_iso):
+def sumar_dia(fecha_iso):
     return (datetime.date.fromisoformat(fecha_iso) + datetime.timedelta(days=1)).isoformat()
 
 
@@ -28,7 +28,7 @@ def construir_eventos(servicios):
             "id": str(s["id"]),
             "title": f"{s['proyecto_nombre']}: {s['nombre']} — {nombres}{sufijo}",
             "start": s["fecha_inicio"],
-            "end": _sumar_dia(s["fecha_fin"]),  # FullCalendar usa 'end' exclusivo
+            "end": sumar_dia(s["fecha_fin"]),  # FullCalendar usa 'end' exclusivo
             "backgroundColor": s["proyecto_color"],
             "borderColor": s["proyecto_color"],
         })

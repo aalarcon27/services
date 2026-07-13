@@ -11,7 +11,8 @@ import streamlit as st
 
 import db
 import auth
-from calendario import mostrar_calendario, restar_dia
+from calendario import mostrar_calendario, restar_dia, sumar_dia
+from drag_scheduler import drag_scheduler
 
 st.set_page_config(page_title="Proyectos INPROCESS", page_icon="📅", layout="wide")
 
@@ -207,6 +208,72 @@ def _procesar_resultado_calendario(resultado, editable):
         st.session_state["rango_nuevo"] = {"inicio": dia, "fin": dia}
 
 
+def _seccion_arrastrar_personal(editable):
+    if not editable:
+        return
+    todos_servicios = db.listar_servicios()
+    personal_todos = db.listar_personal(solo_activos=True)
+    if not todos_servicios or not personal_todos:
+        return
+
+    st.divider()
+    st.markdown("### 🖱️ Asignar personal (arrastra un nombre a una fecha del calendario)")
+    etiquetas_serv = {s["id"]: f"{s['proyecto_nombre']} — {s['nombre']}" for s in todos_servicios}
+    sid_activo = st.selectbox("¿Qué servicio estás agendando?",
+                              options=[s["id"] for s in todos_servicios],
+                              format_func=lambda i: etiquetas_serv[i], key="drag_sel_servicio")
+    servicio_activo = next(s for s in todos_servicios if s["id"] == sid_activo)
+
+    eventos_drag = [
+        {"id": str(p["personal_id"]), "title": p["personal_nombre"],
+         "start": servicio_activo["fecha_inicio"], "end": sumar_dia(servicio_activo["fecha_fin"])}
+        for p in servicio_activo["personal"]
+    ]
+    personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in personal_todos]
+
+    resultado_drag = drag_scheduler(personal_arg, eventos_drag, color=servicio_activo["proyecto_color"],
+                                    fecha_inicial=servicio_activo["fecha_inicio"],
+                                    key=f"drag_{sid_activo}")
+
+    marca = str(resultado_drag)
+    if resultado_drag and marca != st.session_state.get("_drag_marca"):
+        st.session_state["_drag_marca"] = marca
+        accion = resultado_drag.get("accion")
+        if accion in ("asignar", "mover"):
+            person_id = resultado_drag["personId"] if accion == "asignar" else int(resultado_drag["eventId"])
+            fecha = resultado_drag["fecha"]
+            nuevos_ids = sorted(set(servicio_activo["personal_ids"]) | {person_id})
+            nueva_inicio = min(servicio_activo["fecha_inicio"], fecha)
+            nueva_fin = max(servicio_activo["fecha_fin"], fecha)
+            conflictos = db.verificar_conflictos([person_id], nueva_inicio, nueva_fin,
+                                                 excluir_servicio_id=sid_activo)
+            if conflictos:
+                c = conflictos[0]
+                st.error(f"⚠ {c['personal_nombre']} ya está en '{c['servicio']}' del "
+                        f"{c['fecha_inicio']} al {c['fecha_fin']}. No se puede asignar en paralelo.")
+            else:
+                db.actualizar_servicio(sid_activo, servicio_activo["nombre"], nueva_inicio, nueva_fin,
+                                       nuevos_ids, servicio_activo["confirmado"], st.session_state["usuario"])
+                st.success("Personal asignado.")
+                st.rerun()
+
+    asignados = servicio_activo["personal"]
+    if asignados:
+        st.caption(f"Asignados: {', '.join(p['personal_nombre'] for p in asignados)}  ·  "
+                  f"{servicio_activo['fecha_inicio']} a {servicio_activo['fecha_fin']}")
+        c1, c2 = st.columns([3, 1])
+        quitar_id = c1.selectbox(
+            "Quitar a alguien de este servicio", options=[p["personal_id"] for p in asignados],
+            format_func=lambda pid: next(p["personal_nombre"] for p in asignados if p["personal_id"] == pid),
+            key=f"quitar_sel_{sid_activo}", label_visibility="collapsed")
+        if c2.button("🗑 Quitar", key=f"quitar_btn_{sid_activo}"):
+            nuevos_ids = [p["personal_id"] for p in asignados if p["personal_id"] != quitar_id]
+            db.actualizar_servicio(sid_activo, servicio_activo["nombre"], servicio_activo["fecha_inicio"],
+                                   servicio_activo["fecha_fin"], nuevos_ids, servicio_activo["confirmado"],
+                                   st.session_state["usuario"])
+            st.rerun()
+
+
 def pantalla_calendario():
     st.subheader("📅 Calendario de servicios")
     rol = st.session_state["rol"]
@@ -231,6 +298,8 @@ def pantalla_calendario():
 
         if not db.listar_personal():
             st.info("👆 Agrega al menos un **personal** para poder asignarlo a un servicio.")
+
+    _seccion_arrastrar_personal(editable)
 
     proyectos_todos = db.listar_proyectos()
     if proyectos_todos:
