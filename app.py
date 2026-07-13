@@ -143,6 +143,44 @@ def pantalla_calendario():
     rol = st.session_state["rol"]
     editable = rol in ROLES_EDITOR
 
+    if editable:
+        cpers, cproy = st.columns(2)
+        with cpers:
+            with st.expander("➕ Nuevo personal"):
+                with st.form("cal_nuevo_personal", clear_on_submit=True):
+                    c1, c2 = st.columns([3, 1])
+                    nombre_p = c1.text_input("Nombre del técnico", label_visibility="collapsed",
+                                             placeholder="Nombre completo")
+                    if c2.form_submit_button("Agregar") and nombre_p:
+                        db.crear_personal(nombre_p)
+                        st.success(f"'{nombre_p}' agregado.")
+                        st.rerun()
+        with cproy:
+            with st.expander("➕ Nuevo proyecto"):
+                pms = db.listar_usuarios_pm()
+                with st.form("cal_nuevo_proyecto", clear_on_submit=True):
+                    nombre_pr = st.text_input("Nombre del proyecto")
+                    cliente_pr = st.text_input("Cliente")
+                    pm_pr = st.selectbox("PM", options=[u["usuario"] for u in pms],
+                                         format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u))
+                    prevencionista_pr = st.text_input("Prevencionista")
+                    if st.form_submit_button("Crear proyecto") and nombre_pr:
+                        db.crear_proyecto(nombre_pr, cliente_pr, pm_pr, prevencionista_pr,
+                                          st.session_state["usuario"])
+                        st.success(f"Proyecto '{nombre_pr}' creado.")
+                        st.rerun()
+
+        if not db.listar_personal() or not db.listar_proyectos():
+            st.info("👆 Para poder agendar, primero agrega al menos un **personal** y un **proyecto** "
+                    "con los botones de arriba. Luego arrastra sobre el calendario para crear un servicio.")
+
+    proyectos_todos = db.listar_proyectos()
+    if proyectos_todos:
+        chips = " &nbsp;&nbsp; ".join(
+            f"<span style='background-color:{p['color']};color:white;padding:2px 10px;"
+            f"border-radius:10px;font-size:0.85em'>{p['nombre']}</span>" for p in proyectos_todos)
+        st.markdown(chips, unsafe_allow_html=True)
+
     servicios = db.listar_servicios()
     resultado = mostrar_calendario(servicios, editable=editable)
     _procesar_resultado_calendario(resultado, editable)
@@ -175,7 +213,7 @@ def pantalla_calendario():
         st.markdown(f"### ➕ Nuevo servicio ({rango['inicio']} a {rango['fin']})")
         proyectos = db.listar_proyectos()
         if not proyectos:
-            st.warning("Primero crea un proyecto en la sección Proyectos.")
+            st.warning("Primero crea un proyecto con el botón '➕ Nuevo proyecto' de arriba.")
         else:
             pid = st.selectbox("Proyecto", options=[p["id"] for p in proyectos],
                                format_func=lambda i: next(p["nombre"] for p in proyectos if p["id"] == i),
