@@ -1,0 +1,3 @@
+streamlit
+streamlit-calendar
+psycopg2-binary
