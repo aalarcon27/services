@@ -26,7 +26,7 @@ def construir_eventos(servicios):
         sufijo = "" if s.get("confirmado") else " ⚠ no confirmado"
         eventos.append({
             "id": str(s["id"]),
-            "title": f"{s['proyecto_nombre']}: {s['nombre']} — {nombres}{sufijo}",
+            "title": f"{s['proyecto_nombre']} — {nombres}{sufijo}",
             "start": s["fecha_inicio"],
             "end": sumar_dia(s["fecha_fin"]),  # FullCalendar usa 'end' exclusivo
             "backgroundColor": s["proyecto_color"],

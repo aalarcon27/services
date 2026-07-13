@@ -5,33 +5,70 @@
 <style>
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 10px;
+    margin: 0; padding: 14px;
     font-family: -apple-system, "Segoe UI", Arial, sans-serif;
-    font-size: 14px; color: #1f2933;
+    font-size: 15px; color: #22303f;
+    background: transparent;
   }
-  #app { display: flex; gap: 16px; align-items: flex-start; }
-  #personal-panel {
-    flex: 0 0 170px; min-width: 150px;
+  #app { display: flex; gap: 20px; align-items: flex-start; }
+  #personal-panel { flex: 0 0 190px; min-width: 170px; }
+  #personal-panel h4 {
+    margin: 0 0 10px 0; font-size: 13px; letter-spacing: .04em;
+    text-transform: uppercase; color: #7b8794; font-weight: 700;
   }
-  #personal-panel h4 { margin: 0 0 8px 0; font-size: 13px; color: #52606d; }
   .person-chip {
-    background: #4C6EF5; color: #fff; padding: 8px 10px; border-radius: 8px;
-    margin-bottom: 6px; cursor: grab; font-size: 13px; user-select: none;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+    background: #4C6EF5; color: #fff; padding: 12px 14px; border-radius: 14px;
+    margin-bottom: 10px; cursor: grab; font-size: 14px; font-weight: 600;
+    user-select: none; box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+    transition: transform .12s ease, box-shadow .12s ease;
   }
-  .person-chip:active { cursor: grabbing; opacity: 0.8; }
-  .person-chip.fc-event { display: block; }
+  .person-chip:hover { transform: translateY(-2px) scale(1.02); box-shadow: 0 5px 12px rgba(0,0,0,0.25); }
+  .person-chip:active { cursor: grabbing; opacity: 0.85; transform: scale(0.98); }
   #calendar-panel { flex: 1 1 auto; min-width: 0; }
-  .fc-event { cursor: pointer; }
-  #hint { font-size: 12px; color: #7b8794; margin-top: 8px; }
+  #hint {
+    font-size: 12.5px; color: #7b8794; margin-top: 10px; line-height: 1.5;
+    background: #f4f6fb; padding: 10px 12px; border-radius: 10px;
+  }
+
+  /* --- look and feel del calendario: mas redondeado, mas suave --- */
+  .fc {
+    border-radius: 18px; overflow: hidden; box-shadow: 0 4px 18px rgba(30,41,59,0.10);
+    border: 1px solid #e8ecf3;
+  }
+  .fc .fc-toolbar-title { font-size: 1.35em; font-weight: 800; color: #22303f; }
+  .fc .fc-button {
+    background: #eef1f8; border: none; color: #3c4a5e; border-radius: 10px !important;
+    text-transform: capitalize; font-weight: 600; box-shadow: none !important;
+    padding: 6px 14px;
+  }
+  .fc .fc-button:hover { background: #dfe4f0; }
+  .fc .fc-button-primary:not(:disabled).fc-button-active,
+  .fc .fc-button-primary:not(:disabled):active { background: #4C6EF5; color: #fff; }
+  .fc .fc-col-header-cell { background: #f6f8fc; border-color: #eef1f6; }
+  .fc .fc-col-header-cell-cushion {
+    padding: 10px 4px; font-size: 12px; letter-spacing: .05em; text-transform: uppercase;
+    color: #7b8794; font-weight: 700; text-decoration: none;
+  }
+  .fc-theme-standard td, .fc-theme-standard th { border-color: #eef1f6; }
+  .fc .fc-daygrid-day-number { padding: 8px; font-size: 13px; color: #52606d; text-decoration: none; }
+  .fc .fc-day-today { background: #fff7e6 !important; }
+  .fc .fc-day-today .fc-daygrid-day-number {
+    background: #F76707; color: #fff; border-radius: 8px; padding: 4px 9px; font-weight: 700;
+  }
+  .fc-event {
+    cursor: pointer; border: none !important; border-radius: 10px !important;
+    padding: 3px 8px !important; font-weight: 600; font-size: 12.5px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
+  }
+  .fc-daygrid-event { margin-top: 3px !important; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="personal-panel">
-    <h4>Arrastra al calendario</h4>
+    <h4>Personal</h4>
     <div id="personal-list"></div>
-    <div id="hint">Arrastra un nombre a un día para asignarlo. Arrastra un evento ya puesto para cambiarlo de fecha.</div>
+    <div id="hint">👉 Arrastra un nombre a un día para asignarlo. Arrastra un evento ya puesto para cambiarlo de fecha.</div>
   </div>
   <div id="calendar-panel">
     <div id="calendar"></div>
@@ -85,9 +122,10 @@ function render(args) {
   calendarInstance = new FullCalendar.Calendar(calendarEl, {
     initialView: "dayGridMonth",
     initialDate: args.fechaInicial || undefined,
-    height: 600,
+    height: 780,
     droppable: true,
     editable: true,
+    dayMaxEvents: 3,
     headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,timeGridWeek" },
     events: (args.eventos || []).map(function (e) {
       return Object.assign({}, e, {
@@ -107,7 +145,7 @@ function render(args) {
     },
   });
   calendarInstance.render();
-  setFrameHeight(650);
+  setFrameHeight(830);
 }
 
 window.addEventListener("message", function (event) {
@@ -116,7 +154,7 @@ window.addEventListener("message", function (event) {
 });
 
 sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
-setFrameHeight(650);
+setFrameHeight(830);
 </script>
 </body>
 </html>
