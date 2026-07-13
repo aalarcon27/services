@@ -102,8 +102,8 @@ def _formulario_servicio(proyecto_id, servicio=None, prefill_fechas=None, key_su
 
 def _formulario_agendar():
     """Crea un proyecto/servicio nuevo — en esta app son lo mismo, un solo
-    nombre. Para ponerle fechas y personal se usa la sección de abajo
-    (arrastrar), no hace falta pedirlas aquí."""
+    nombre. El personal se asigna despues arrastrando en la seccion de
+    abajo, pero las fechas iniciales y si esta confirmado se ponen aqui."""
     pms = db.listar_usuarios_pm()
     nombre = st.text_input("Nombre", key="agendar_nombre", placeholder="Ej: Instalación detectores")
     c1, c2 = st.columns(2)
@@ -112,15 +112,22 @@ def _formulario_agendar():
                       format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u),
                       key="agendar_pm")
     prevencionista = st.text_input("Prevencionista", key="agendar_prev")
+    c3, c4 = st.columns(2)
+    fecha_inicio = c3.date_input("Fecha inicio", value=date.today(), key="agendar_fi")
+    fecha_fin = c4.date_input("Fecha fin", value=date.today(), key="agendar_ff")
+    confirmado = st.checkbox("Fecha confirmada", key="agendar_confirmado")
 
     if st.button("➕ Crear", type="primary", key="agendar_submit"):
         if not nombre:
             st.error("Ponle un nombre.")
             return
+        if fecha_fin < fecha_inicio:
+            st.error("La fecha fin no puede ser antes que la fecha de inicio.")
+            return
         usuario = st.session_state["usuario"]
         proyecto_id = db.crear_proyecto(nombre, cliente, pm, prevencionista, usuario)
-        hoy = date.today().isoformat()
-        db.crear_servicio(proyecto_id, nombre, hoy, hoy, [], False, usuario)
+        db.crear_servicio(proyecto_id, nombre, fecha_inicio.isoformat(), fecha_fin.isoformat(),
+                          [], confirmado, usuario)
         st.success(f"'{nombre}' creado. Arrastra personal abajo para agendarlo.")
         st.rerun()
 
@@ -139,9 +146,16 @@ def _seccion_arrastrar_personal(editable):
                               format_func=lambda i: etiquetas_serv[i], key="drag_sel_servicio")
     servicio_activo = next(s for s in todos_servicios if s["id"] == sid_activo)
 
+    proyecto_completo = db.obtener_proyecto(servicio_activo["proyecto_id"])
+    pms = db.listar_usuarios_pm()
+    pm_nombre = next((x["nombre"] for x in pms if x["usuario"] == proyecto_completo["pm_usuario"]),
+                     proyecto_completo["pm_usuario"] or "-")
     st.markdown(
-        f"<h2><span style='color:{servicio_activo['proyecto_color']}'>●</span> "
-        f"{servicio_activo['proyecto_nombre']}</h2>", unsafe_allow_html=True)
+        f"<h2 style='margin-bottom:0'><span style='color:{servicio_activo['proyecto_color']}'>●</span> "
+        f"{servicio_activo['proyecto_nombre']}</h2>"
+        f"<p style='color:#7b8794;margin-top:0'>PM: <b>{pm_nombre}</b> &nbsp;·&nbsp; "
+        f"Prevencionista: <b>{proyecto_completo['prevencionista'] or '-'}</b></p>",
+        unsafe_allow_html=True)
 
     eventos_drag = [
         {"id": str(p["personal_id"]), "title": p["personal_nombre"],
