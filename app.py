@@ -99,6 +99,72 @@ def _formulario_servicio(proyecto_id, servicio=None, prefill_fechas=None, key_su
     return False
 
 
+NUEVO_PROYECTO = "__nuevo__"
+
+
+def _formulario_agendar():
+    """Un solo formulario: elige un proyecto existente o crea uno nuevo al vuelo,
+    y agenda el servicio (fechas/personal) en el mismo envío."""
+    proyectos = db.listar_proyectos()
+    pms = db.listar_usuarios_pm()
+    etiquetas = {NUEVO_PROYECTO: "➕ Proyecto nuevo"}
+    etiquetas.update({p["id"]: p["nombre"] for p in proyectos})
+    seleccion_proy = st.selectbox("Proyecto", options=[NUEVO_PROYECTO] + [p["id"] for p in proyectos],
+                                  format_func=lambda v: etiquetas[v], key="agendar_sel_proy")
+
+    nombre_proy = cliente_proy = pm_proy = prevencionista_proy = None
+    if seleccion_proy == NUEVO_PROYECTO:
+        c1, c2 = st.columns(2)
+        nombre_proy = c1.text_input("Nombre del proyecto", key="agendar_np_nombre")
+        cliente_proy = c2.text_input("Cliente", key="agendar_np_cliente")
+        c3, c4 = st.columns(2)
+        pm_proy = c3.selectbox("PM", options=[u["usuario"] for u in pms],
+                               format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u),
+                               key="agendar_np_pm")
+        prevencionista_proy = c4.text_input("Prevencionista", key="agendar_np_prev")
+
+    st.markdown("**Servicio**")
+    rango = st.session_state.get("rango_nuevo")
+    nombre_serv = st.text_input("Nombre del servicio", key="agendar_serv_nombre")
+    c5, c6 = st.columns(2)
+    fecha_inicio = c5.date_input("Fecha inicio", value=(rango["inicio"] if rango else date.today()),
+                                 key="agendar_fi")
+    fecha_fin = c6.date_input("Fecha fin", value=(rango["fin"] if rango else date.today()), key="agendar_ff")
+    personal_todos = db.listar_personal(solo_activos=True)
+    seleccion_personal = st.multiselect(
+        "Personal asignado", options=[p["id"] for p in personal_todos],
+        format_func=lambda pid: next((p["nombre"] for p in personal_todos if p["id"] == pid), "?"),
+        key="agendar_personal")
+    confirmado_serv = st.checkbox("Fecha confirmada", key="agendar_confirmado")
+
+    if st.button("📅 Agendar", type="primary", key="agendar_submit"):
+        if seleccion_proy == NUEVO_PROYECTO and not nombre_proy:
+            st.error("Ponle un nombre al proyecto nuevo.")
+            return
+        if not nombre_serv:
+            st.error("Ponle un nombre al servicio.")
+            return
+        if fecha_fin < fecha_inicio:
+            st.error("La fecha fin no puede ser antes que la fecha de inicio.")
+            return
+        conflictos = db.verificar_conflictos(seleccion_personal, fecha_inicio.isoformat(), fecha_fin.isoformat())
+        if conflictos:
+            c = conflictos[0]
+            st.error(f"⚠ {c['personal_nombre']} ya está en '{c['servicio']}' del "
+                    f"{c['fecha_inicio']} al {c['fecha_fin']}. No se puede asignar en paralelo.")
+            return
+        usuario = st.session_state["usuario"]
+        if seleccion_proy == NUEVO_PROYECTO:
+            proyecto_id = db.crear_proyecto(nombre_proy, cliente_proy, pm_proy, prevencionista_proy, usuario)
+        else:
+            proyecto_id = seleccion_proy
+        db.crear_servicio(proyecto_id, nombre_serv, fecha_inicio.isoformat(), fecha_fin.isoformat(),
+                          seleccion_personal, confirmado_serv, usuario)
+        st.success("Agendado.")
+        st.session_state["rango_nuevo"] = None
+        st.rerun()
+
+
 # ===================================================================
 # CALENDARIO
 # ===================================================================
@@ -147,7 +213,7 @@ def pantalla_calendario():
     editable = rol in ROLES_EDITOR
 
     if editable:
-        cpers, cproy, cserv = st.columns(3)
+        cpers, cagenda = st.columns([1, 2])
         with cpers:
             with st.expander("➕ Nuevo personal"):
                 with st.form("cal_nuevo_personal", clear_on_submit=True):
@@ -158,38 +224,13 @@ def pantalla_calendario():
                         db.crear_personal(nombre_p)
                         st.success(f"'{nombre_p}' agregado.")
                         st.rerun()
-        with cproy:
-            with st.expander("➕ Nuevo proyecto"):
-                pms = db.listar_usuarios_pm()
-                with st.form("cal_nuevo_proyecto", clear_on_submit=True):
-                    nombre_pr = st.text_input("Nombre del proyecto")
-                    cliente_pr = st.text_input("Cliente")
-                    pm_pr = st.selectbox("PM", options=[u["usuario"] for u in pms],
-                                         format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u))
-                    prevencionista_pr = st.text_input("Prevencionista")
-                    if st.form_submit_button("Crear proyecto") and nombre_pr:
-                        db.crear_proyecto(nombre_pr, cliente_pr, pm_pr, prevencionista_pr,
-                                          st.session_state["usuario"])
-                        st.success(f"Proyecto '{nombre_pr}' creado.")
-                        st.rerun()
-        with cserv:
-            proyectos_disp = db.listar_proyectos()
-            with st.expander("➕ Nuevo servicio", expanded=bool(st.session_state.get("rango_nuevo"))):
-                if not proyectos_disp:
-                    st.caption("Primero crea un proyecto (arriba).")
-                else:
-                    pid_rapido = st.selectbox(
-                        "Proyecto", options=[p["id"] for p in proyectos_disp],
-                        format_func=lambda i: next(p["nombre"] for p in proyectos_disp if p["id"] == i),
-                        key="sel_proy_top")
-                    rango_prefill = st.session_state.get("rango_nuevo")
-                    if _formulario_servicio(pid_rapido, prefill_fechas=rango_prefill, key_sufijo="top"):
-                        st.session_state["rango_nuevo"] = None
-                        st.rerun()
+        with cagenda:
+            with st.expander("📅 Agendar (proyecto/servicio)",
+                             expanded=bool(st.session_state.get("rango_nuevo"))):
+                _formulario_agendar()
 
-        if not db.listar_personal() or not db.listar_proyectos():
-            st.info("👆 Para poder agendar, primero agrega al menos un **personal** y un **proyecto**. "
-                    "Luego usa '➕ Nuevo servicio' o haz clic en un día del calendario.")
+        if not db.listar_personal():
+            st.info("👆 Agrega al menos un **personal** para poder asignarlo a un servicio.")
 
     proyectos_todos = db.listar_proyectos()
     if proyectos_todos:
@@ -227,7 +268,7 @@ def pantalla_calendario():
     if st.session_state.get("rango_nuevo") and editable:
         rango = st.session_state["rango_nuevo"]
         st.info(f"📌 Fechas tomadas del calendario: **{rango['inicio']} a {rango['fin']}** — "
-               "complétalo en '➕ Nuevo servicio' arriba.")
+               "complétalo en '📅 Agendar' arriba.")
         if st.button("Cancelar"):
             st.session_state["rango_nuevo"] = None
             st.rerun()
