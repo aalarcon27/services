@@ -157,8 +157,17 @@ def _seccion_arrastrar_personal(editable):
         f"Prevencionista: <b>{proyecto_completo['prevencionista'] or '-'}</b></p>",
         unsafe_allow_html=True)
 
+    cliente = proyecto_completo.get("cliente") or ""
+    partes = [servicio_activo["proyecto_nombre"]]
+    if cliente:
+        partes.append(cliente)
+    partes.append(f"PM {pm_nombre}")
+    if proyecto_completo.get("prevencionista"):
+        partes.append(f"Prev. {proyecto_completo['prevencionista']}")
+    titulo_evento = " · ".join(partes)
+
     eventos_drag = [
-        {"id": str(p["personal_id"]), "title": p["personal_nombre"],
+        {"id": str(p["personal_id"]), "title": f"{titulo_evento} — {p['personal_nombre']}",
          "start": servicio_activo["fecha_inicio"], "end": sumar_dia(servicio_activo["fecha_fin"])}
         for p in servicio_activo["personal"]
     ]
@@ -166,7 +175,7 @@ def _seccion_arrastrar_personal(editable):
     if editable:
         personal_todos = db.listar_personal(solo_activos=True)
         if not personal_todos:
-            st.info("👆 Agrega personal arriba para poder asignarlo.")
+            st.info("Aún no hay personal. Agrégalo en la pestaña **Personal** del menú.")
         personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in personal_todos]
 
         resultado_drag = drag_scheduler(personal_arg, eventos_drag, color=servicio_activo["proyecto_color"],
@@ -220,23 +229,11 @@ def pantalla_calendario():
     editable = rol in ROLES_EDITOR
 
     if editable:
-        cpers, cagenda = st.columns([1, 2])
-        with cpers:
-            with st.expander("➕ Nuevo personal"):
-                with st.form("cal_nuevo_personal", clear_on_submit=True):
-                    c1, c2 = st.columns([3, 1])
-                    nombre_p = c1.text_input("Nombre del técnico", label_visibility="collapsed",
-                                             placeholder="Nombre completo")
-                    if c2.form_submit_button("Agregar") and nombre_p:
-                        db.crear_personal(nombre_p)
-                        st.success(f"'{nombre_p}' agregado.")
-                        st.rerun()
-        with cagenda:
-            with st.expander("➕ Nuevo proyecto"):
-                _formulario_agendar()
+        with st.expander("➕ Nuevo proyecto"):
+            _formulario_agendar()
 
         if not db.listar_personal():
-            st.info("👆 Agrega al menos un **personal** para poder asignarlo.")
+            st.info("Aún no hay personal. Agrégalo en la pestaña **Personal** del menú para poder asignarlo.")
 
     _seccion_arrastrar_personal(editable)
 
