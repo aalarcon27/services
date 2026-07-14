@@ -104,9 +104,11 @@ def _formulario_servicio(proyecto_id, servicio=None, prefill_fechas=None, key_su
 # CALENDARIO — un solo calendario grande con TODOS los proyectos
 # ===================================================================
 def _etiqueta_proyecto(servicio, pm_nombre):
-    partes = [servicio["proyecto_nombre"]]
+    # Cliente primero, luego el proyecto, luego PM / prevencionista / personal.
+    partes = []
     if servicio.get("cliente"):
         partes.append(servicio["cliente"])
+    partes.append(servicio["proyecto_nombre"])
     partes.append(f"PM {pm_nombre}")
     if servicio.get("prevencionista"):
         partes.append(f"Prev. {servicio['prevencionista']}")
