@@ -125,8 +125,12 @@ def _panel_editar_proyecto(sid, pms, editable):
         st.session_state["editar_proyecto_sid"] = None
         return
     color = proyecto["color"]
-    st.markdown(f"<h3><span style='color:{color}'>●</span> {proyecto['nombre']}</h3>",
-                unsafe_allow_html=True)
+    ct1, ct2 = st.columns([5, 1])
+    ct1.markdown(f"<h3><span style='color:{color}'>●</span> {proyecto['nombre']}</h3>",
+                 unsafe_allow_html=True)
+    if ct2.button("✖ Cerrar", key=f"cerrar_top_{sid}", type="primary"):
+        st.session_state["editar_proyecto_sid"] = None
+        st.rerun()
 
     if not editable:
         pm_nombre = next((x["nombre"] for x in pms if x["usuario"] == proyecto["pm_usuario"]), proyecto["pm_usuario"])
@@ -221,10 +225,6 @@ def _panel_editar_proyecto(sid, pms, editable):
             st.session_state[f"confirm_del_{sid}"] = True
             st.rerun()
 
-    if st.button("✖ Cerrar", key=f"cerrar_panel_{sid}"):
-        st.session_state["editar_proyecto_sid"] = None
-        st.rerun()
-
 
 def pantalla_calendario():
     st.subheader("📅 Calendario de proyectos")
@@ -250,7 +250,15 @@ def pantalla_calendario():
         personal_todos = db.listar_personal(solo_activos=True)
         if not personal_todos:
             st.info("Aún no hay personal. Agrégalo en la pestaña **Personal** del menú para poder asignarlo.")
-        personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in personal_todos]
+        # El personal ya asignado a algun proyecto no aparece en la lista de disponibles
+        # (se libera quitandolo desde el proyecto). "Disponible" = sin proyecto asignado.
+        ocupados = set()
+        for s in servicios:
+            ocupados.update(s["personal_ids"])
+        disponibles = [p for p in personal_todos if p["id"] not in ocupados]
+        personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in disponibles]
+        if personal_todos and not disponibles:
+            st.caption("Todo el personal está asignado. Para liberar a alguien, abre su proyecto y quítalo con 🗑.")
         fecha_ini_cal = min(s["fecha_inicio"] for s in servicios)
 
         resultado = drag_scheduler(personal_arg, proyectos_arg, fecha_inicial=fecha_ini_cal,
