@@ -11,7 +11,7 @@ import streamlit as st
 
 import db
 import auth
-from calendario import mostrar_calendario, sumar_dia
+from calendario import mostrar_calendario, sumar_dia, restar_dia
 from drag_scheduler import drag_scheduler
 
 st.set_page_config(page_title="Proyectos INPROCESS", page_icon="📅", layout="wide")
@@ -100,142 +100,225 @@ def _formulario_servicio(proyecto_id, servicio=None, prefill_fechas=None, key_su
     return False
 
 
-def _formulario_agendar():
-    """Crea un proyecto/servicio nuevo — en esta app son lo mismo, un solo
-    nombre. El personal se asigna despues arrastrando en la seccion de
-    abajo, pero las fechas iniciales y si esta confirmado se ponen aqui."""
-    pms = db.listar_usuarios_pm()
-    nombre = st.text_input("Nombre", key="agendar_nombre", placeholder="Ej: Instalación detectores")
-    c1, c2 = st.columns(2)
-    cliente = c1.text_input("Cliente", key="agendar_cliente")
-    pm = c2.selectbox("PM", options=[u["usuario"] for u in pms],
-                      format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u),
-                      key="agendar_pm")
-    prevencionista = st.text_input("Prevencionista", key="agendar_prev")
-    c3, c4 = st.columns(2)
-    fecha_inicio = c3.date_input("Fecha inicio", value=date.today(), key="agendar_fi")
-    fecha_fin = c4.date_input("Fecha fin", value=date.today(), key="agendar_ff")
-    confirmado = st.checkbox("Fecha confirmada", key="agendar_confirmado")
+# ===================================================================
+# CALENDARIO — un solo calendario grande con TODOS los proyectos
+# ===================================================================
+def _etiqueta_proyecto(servicio, pm_nombre):
+    partes = [servicio["proyecto_nombre"]]
+    if servicio.get("cliente"):
+        partes.append(servicio["cliente"])
+    partes.append(f"PM {pm_nombre}")
+    if servicio.get("prevencionista"):
+        partes.append(f"Prev. {servicio['prevencionista']}")
+    asignados = ", ".join(p["personal_nombre"] for p in servicio.get("personal", []))
+    if asignados:
+        partes.append(f"👷 {asignados}")
+    return "  ·  ".join(partes)
 
-    if st.button("➕ Crear", type="primary", key="agendar_submit"):
-        if not nombre:
-            st.error("Ponle un nombre.")
-            return
-        if fecha_fin < fecha_inicio:
-            st.error("La fecha fin no puede ser antes que la fecha de inicio.")
-            return
-        usuario = st.session_state["usuario"]
-        proyecto_id = db.crear_proyecto(nombre, cliente, pm, prevencionista, usuario)
-        db.crear_servicio(proyecto_id, nombre, fecha_inicio.isoformat(), fecha_fin.isoformat(),
-                          [], confirmado, usuario)
-        st.success(f"'{nombre}' creado. Arrastra personal abajo para agendarlo.")
+
+def _panel_editar_proyecto(sid, pms, editable):
+    """Panel que se abre al hacer clic en un proyecto del calendario:
+    editar fechas, checklist de SST, personal asignado, eliminar."""
+    s = db.obtener_servicio(sid)
+    proyecto = db.obtener_proyecto(s["proyecto_id"])
+    if not s or not proyecto:
+        st.session_state["editar_proyecto_sid"] = None
+        return
+    color = proyecto["color"]
+    st.markdown(f"<h3><span style='color:{color}'>●</span> {proyecto['nombre']}</h3>",
+                unsafe_allow_html=True)
+
+    if not editable:
+        pm_nombre = next((x["nombre"] for x in pms if x["usuario"] == proyecto["pm_usuario"]), proyecto["pm_usuario"])
+        st.write(f"**Cliente:** {proyecto['cliente'] or '-'}  ·  **PM:** {pm_nombre}  ·  "
+                f"**Prevencionista:** {proyecto['prevencionista'] or '-'}")
+        st.write(f"**Fechas:** {s['fecha_inicio']} a {s['fecha_fin']}  ·  "
+                f"{'✅ confirmado' if s['confirmado'] else '⚠ no confirmado'}")
+    else:
+        with st.form(f"editar_proy_form_{sid}"):
+            c1, c2 = st.columns(2)
+            nombre = c1.text_input("Nombre", value=proyecto["nombre"])
+            cliente = c2.text_input("Cliente", value=proyecto["cliente"] or "")
+            usuarios_pm = [u["usuario"] for u in pms]
+            idx = usuarios_pm.index(proyecto["pm_usuario"]) if proyecto["pm_usuario"] in usuarios_pm else 0
+            c3, c4 = st.columns(2)
+            pm = c3.selectbox("PM", options=usuarios_pm, index=idx,
+                              format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u))
+            prevencionista = c4.text_input("Prevencionista", value=proyecto["prevencionista"] or "")
+            c5, c6 = st.columns(2)
+            fecha_inicio = c5.date_input("Fecha inicio", value=date.fromisoformat(s["fecha_inicio"]))
+            fecha_fin = c6.date_input("Fecha fin", value=date.fromisoformat(s["fecha_fin"]))
+            confirmado = st.checkbox("Fecha confirmada", value=bool(s["confirmado"]))
+            if st.form_submit_button("💾 Guardar cambios"):
+                if fecha_fin < fecha_inicio:
+                    st.error("La fecha fin no puede ser antes que la de inicio.")
+                else:
+                    conflictos = db.verificar_conflictos(s["personal_ids"], fecha_inicio.isoformat(),
+                                                         fecha_fin.isoformat(), excluir_servicio_id=sid)
+                    if conflictos:
+                        c = conflictos[0]
+                        st.error(f"⚠ {c['personal_nombre']} ya está en '{c['servicio']}' del "
+                                f"{c['fecha_inicio']} al {c['fecha_fin']}. Cambia las fechas o quítalo.")
+                    else:
+                        db.editar_proyecto(proyecto["id"], nombre, cliente, pm, prevencionista)
+                        db.actualizar_servicio(sid, nombre, fecha_inicio.isoformat(), fecha_fin.isoformat(),
+                                               s["personal_ids"], confirmado, st.session_state["usuario"])
+                        st.success("Guardado.")
+                        st.rerun()
+
+    # ---- Personal asignado ----
+    st.markdown("**👷 Personal asignado**")
+    if not s["personal"]:
+        st.caption("Nadie asignado. Arrastra personal sobre la barra del proyecto en el calendario.")
+    for p in s["personal"]:
+        cc1, cc2 = st.columns([5, 1])
+        cc1.write(f"• {p['personal_nombre']}")
+        if editable and cc2.button("🗑", key=f"quitar_{sid}_{p['personal_id']}"):
+            nuevos = [x["personal_id"] for x in s["personal"] if x["personal_id"] != p["personal_id"]]
+            db.actualizar_servicio(sid, s["nombre"], s["fecha_inicio"], s["fecha_fin"], nuevos,
+                                   s["confirmado"], st.session_state["usuario"])
+            st.rerun()
+
+    # ---- Requisitos SST (checklist) ----
+    st.markdown("**✅ Requisitos de seguridad (SST)**")
+    sst = db.listar_sst(proyecto["id"])
+    if not sst:
+        st.caption("Sin requisitos agregados todavía.")
+    for r in sst:
+        cc1, cc2, cc3, cc4 = st.columns([3, 1, 1, 0.6])
+        cc1.write(r["nombre"])
+        enviado = cc2.checkbox("Enviado", value=bool(r["enviado"]), key=f"sst_env_{r['id']}", disabled=not editable)
+        aprobado = cc3.checkbox("Aprobado", value=bool(r["aprobado"]), key=f"sst_apr_{r['id']}", disabled=not editable)
+        if editable and (enviado != bool(r["enviado"]) or aprobado != bool(r["aprobado"])):
+            db.actualizar_sst(r["id"], enviado, aprobado)
+            st.rerun()
+        if editable and cc4.button("🗑", key=f"sst_del_{r['id']}"):
+            db.eliminar_sst(r["id"])
+            st.rerun()
+    if editable:
+        with st.form(f"nuevo_sst_cal_{proyecto['id']}", clear_on_submit=True):
+            cc1, cc2 = st.columns([4, 1])
+            nuevo = cc1.text_input("Nuevo requisito", label_visibility="collapsed",
+                                   placeholder="Ej: Plan de seguridad, ATS, Seguro SCTR...")
+            if cc2.form_submit_button("➕ Agregar") and nuevo:
+                db.agregar_sst(proyecto["id"], nuevo)
+                st.rerun()
+
+    if editable:
+        st.divider()
+        if st.session_state.get(f"confirm_del_{sid}"):
+            st.warning(f"¿Eliminar el proyecto '{proyecto['nombre']}'? No se puede deshacer.")
+            d1, d2 = st.columns(2)
+            if d1.button("✅ Sí, eliminar", key=f"delok_{sid}"):
+                db.eliminar_proyecto(proyecto["id"])
+                st.session_state["editar_proyecto_sid"] = None
+                st.session_state.pop(f"confirm_del_{sid}", None)
+                st.rerun()
+            if d2.button("❌ Cancelar", key=f"delno_{sid}"):
+                st.session_state.pop(f"confirm_del_{sid}", None)
+                st.rerun()
+        elif st.button("🗑 Eliminar proyecto", key=f"del_{sid}"):
+            st.session_state[f"confirm_del_{sid}"] = True
+            st.rerun()
+
+    if st.button("✖ Cerrar", key=f"cerrar_panel_{sid}"):
+        st.session_state["editar_proyecto_sid"] = None
         st.rerun()
 
 
-# ===================================================================
-# CALENDARIO — una sola vista: nombre del proyecto, calendario, personal
-# ===================================================================
-def _seccion_arrastrar_personal(editable):
-    todos_servicios = db.listar_servicios()
-    if not todos_servicios:
-        st.info("👆 Crea un proyecto arriba para empezar a agendar.")
+def pantalla_calendario():
+    st.subheader("📅 Calendario de proyectos")
+    rol = st.session_state["rol"]
+    editable = rol in ROLES_EDITOR
+    pms = db.listar_usuarios_pm()
+
+    servicios = db.listar_servicios()
+    if not servicios:
+        st.info("Aún no hay proyectos. Créalos en la pestaña **Proyectos** del menú y aparecerán aquí.")
         return
 
-    etiquetas_serv = {s["id"]: s["proyecto_nombre"] for s in todos_servicios}
-    sid_activo = st.selectbox("Proyecto", options=[s["id"] for s in todos_servicios],
-                              format_func=lambda i: etiquetas_serv[i], key="drag_sel_servicio")
-    servicio_activo = next(s for s in todos_servicios if s["id"] == sid_activo)
-
-    proyecto_completo = db.obtener_proyecto(servicio_activo["proyecto_id"])
-    pms = db.listar_usuarios_pm()
-    pm_nombre = next((x["nombre"] for x in pms if x["usuario"] == proyecto_completo["pm_usuario"]),
-                     proyecto_completo["pm_usuario"] or "-")
-    st.markdown(
-        f"<h2 style='margin-bottom:0'><span style='color:{servicio_activo['proyecto_color']}'>●</span> "
-        f"{servicio_activo['proyecto_nombre']}</h2>"
-        f"<p style='color:#7b8794;margin-top:0'>PM: <b>{pm_nombre}</b> &nbsp;·&nbsp; "
-        f"Prevencionista: <b>{proyecto_completo['prevencionista'] or '-'}</b></p>",
-        unsafe_allow_html=True)
-
-    cliente = proyecto_completo.get("cliente") or ""
-    partes = [servicio_activo["proyecto_nombre"]]
-    if cliente:
-        partes.append(cliente)
-    partes.append(f"PM {pm_nombre}")
-    if proyecto_completo.get("prevencionista"):
-        partes.append(f"Prev. {proyecto_completo['prevencionista']}")
-    titulo_evento = " · ".join(partes)
-
-    eventos_drag = [
-        {"id": str(p["personal_id"]), "title": f"{titulo_evento} — {p['personal_nombre']}",
-         "start": servicio_activo["fecha_inicio"], "end": sumar_dia(servicio_activo["fecha_fin"])}
-        for p in servicio_activo["personal"]
+    pm_por_usuario = {u["usuario"]: u["nombre"] for u in pms}
+    proyectos_arg = [
+        {"id": s["id"],
+         "label": _etiqueta_proyecto(s, pm_por_usuario.get(s.get("pm_usuario"), s.get("pm_usuario") or "-")),
+         "start": s["fecha_inicio"], "end": sumar_dia(s["fecha_fin"]),
+         "color": s["proyecto_color"]}
+        for s in servicios
     ]
 
     if editable:
         personal_todos = db.listar_personal(solo_activos=True)
         if not personal_todos:
-            st.info("Aún no hay personal. Agrégalo en la pestaña **Personal** del menú.")
-        personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in personal_todos]
-
-        resultado_drag = drag_scheduler(personal_arg, eventos_drag, color=servicio_activo["proyecto_color"],
-                                        fecha_inicial=servicio_activo["fecha_inicio"],
-                                        key=f"drag_{sid_activo}")
-
-        marca = str(resultado_drag)
-        if resultado_drag and marca != st.session_state.get("_drag_marca"):
-            st.session_state["_drag_marca"] = marca
-            accion = resultado_drag.get("accion")
-            if accion in ("asignar", "mover"):
-                person_id = resultado_drag["personId"] if accion == "asignar" else int(resultado_drag["eventId"])
-                fecha = resultado_drag["fecha"]
-                nuevos_ids = sorted(set(servicio_activo["personal_ids"]) | {person_id})
-                nueva_inicio = min(servicio_activo["fecha_inicio"], fecha)
-                nueva_fin = max(servicio_activo["fecha_fin"], fecha)
-                conflictos = db.verificar_conflictos([person_id], nueva_inicio, nueva_fin,
-                                                     excluir_servicio_id=sid_activo)
-                if conflictos:
-                    c = conflictos[0]
-                    st.error(f"⚠ {c['personal_nombre']} ya está en '{c['servicio']}' del "
-                            f"{c['fecha_inicio']} al {c['fecha_fin']}. No se puede asignar en paralelo.")
-                else:
-                    db.actualizar_servicio(sid_activo, servicio_activo["nombre"], nueva_inicio, nueva_fin,
-                                           nuevos_ids, servicio_activo["confirmado"], st.session_state["usuario"])
-                    st.success("Personal asignado.")
-                    st.rerun()
-    else:
-        mostrar_calendario([servicio_activo], editable=False, key=f"cal_ro_{sid_activo}")
-
-    asignados = servicio_activo["personal"]
-    st.markdown("**👷 Personal asignado**")
-    if not asignados:
-        st.caption("Nadie asignado todavía." + (" Arrástralo desde la lista de arriba." if editable else ""))
-    else:
-        for p in asignados:
-            c1, c2 = st.columns([5, 1])
-            c1.write(f"• {p['personal_nombre']}")
-            if editable and c2.button("🗑", key=f"quitar_{sid_activo}_{p['personal_id']}"):
-                nuevos_ids = [x["personal_id"] for x in asignados if x["personal_id"] != p["personal_id"]]
-                db.actualizar_servicio(sid_activo, servicio_activo["nombre"], servicio_activo["fecha_inicio"],
-                                       servicio_activo["fecha_fin"], nuevos_ids, servicio_activo["confirmado"],
-                                       st.session_state["usuario"])
-                st.rerun()
-        st.caption(f"Fechas: {servicio_activo['fecha_inicio']} a {servicio_activo['fecha_fin']}")
-
-
-def pantalla_calendario():
-    st.subheader("📅 Calendario")
-    rol = st.session_state["rol"]
-    editable = rol in ROLES_EDITOR
-
-    if editable:
-        with st.expander("➕ Nuevo proyecto"):
-            _formulario_agendar()
-
-        if not db.listar_personal():
             st.info("Aún no hay personal. Agrégalo en la pestaña **Personal** del menú para poder asignarlo.")
+        personal_arg = [{"id": p["id"], "nombre": p["nombre"]} for p in personal_todos]
+        fecha_ini_cal = min(s["fecha_inicio"] for s in servicios)
 
-    _seccion_arrastrar_personal(editable)
+        resultado = drag_scheduler(personal_arg, proyectos_arg, fecha_inicial=fecha_ini_cal,
+                                   key="drag_calendario")
+        _procesar_accion_drag(resultado)
+    else:
+        mostrar_calendario(servicios, editable=False, key="cal_solo_lectura")
+
+    if st.session_state.get("editar_proyecto_sid"):
+        st.divider()
+        _panel_editar_proyecto(st.session_state["editar_proyecto_sid"], pms, editable)
+
+
+def _procesar_accion_drag(resultado):
+    if not resultado:
+        return
+    marca = str(resultado)
+    if marca == st.session_state.get("_drag_marca"):
+        return
+    st.session_state["_drag_marca"] = marca
+    accion = resultado.get("accion")
+
+    if accion == "click_proyecto":
+        st.session_state["editar_proyecto_sid"] = int(resultado["projectId"])
+        st.rerun()
+
+    elif accion == "asignar":
+        sid = int(resultado["projectId"])
+        person_id = int(resultado["personId"])
+        s = db.obtener_servicio(sid)
+        if not s:
+            return
+        if person_id in s["personal_ids"]:
+            return
+        conflictos = db.verificar_conflictos([person_id], s["fecha_inicio"], s["fecha_fin"],
+                                             excluir_servicio_id=sid)
+        if conflictos:
+            c = conflictos[0]
+            st.error(f"⚠ {c['personal_nombre']} ya está en '{c['servicio']}' del "
+                    f"{c['fecha_inicio']} al {c['fecha_fin']}. No se puede asignar en paralelo.")
+        else:
+            nuevos = sorted(set(s["personal_ids"]) | {person_id})
+            db.actualizar_servicio(sid, s["nombre"], s["fecha_inicio"], s["fecha_fin"], nuevos,
+                                   s["confirmado"], st.session_state["usuario"])
+            st.success("Personal asignado.")
+            st.rerun()
+
+    elif accion == "mover_proyecto":
+        sid = int(resultado["projectId"])
+        s = db.obtener_servicio(sid)
+        if not s:
+            return
+        nueva_inicio = resultado["start"]
+        nueva_fin = restar_dia(resultado["endExcl"]) if resultado.get("endExcl") else nueva_inicio
+        conflictos = db.verificar_conflictos(s["personal_ids"], nueva_inicio, nueva_fin,
+                                             excluir_servicio_id=sid)
+        if conflictos:
+            c = conflictos[0]
+            st.error(f"⚠ No se pudo mover: {c['personal_nombre']} quedaría en paralelo con "
+                    f"'{c['servicio']}' ({c['fecha_inicio']} a {c['fecha_fin']}).")
+        else:
+            db.actualizar_servicio(sid, s["nombre"], nueva_inicio, nueva_fin, s["personal_ids"],
+                                   s["confirmado"], st.session_state["usuario"])
+            st.success("Fechas del proyecto actualizadas.")
+        st.rerun()
+
+    elif accion == "sin_proyecto":
+        st.warning("Suelta el nombre encima de la barra de un proyecto para asignarlo.")
 
 
 # ===================================================================
@@ -248,16 +331,27 @@ def pantalla_proyectos():
     pms = db.listar_usuarios_pm()
 
     if editable:
-        with st.expander("➕ Nuevo proyecto"):
-            with st.form("nuevo_proyecto", clear_on_submit=True):
-                nombre = st.text_input("Nombre del proyecto")
-                cliente = st.text_input("Cliente")
-                pm = st.selectbox("PM (Project Manager)", options=[u["usuario"] for u in pms],
-                                  format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u))
-                prevencionista = st.text_input("Prevencionista")
-                if st.form_submit_button("Crear proyecto") and nombre:
-                    db.crear_proyecto(nombre, cliente, pm, prevencionista, st.session_state["usuario"])
-                    st.success("Proyecto creado.")
+        st.markdown("### ➕ Crear proyecto nuevo")
+        with st.form("nuevo_proyecto", clear_on_submit=True):
+            nombre = st.text_input("Nombre del proyecto")
+            c1, c2 = st.columns(2)
+            cliente = c1.text_input("Cliente")
+            pm = c2.selectbox("PM (Project Manager)", options=[u["usuario"] for u in pms],
+                              format_func=lambda u: next(x["nombre"] for x in pms if x["usuario"] == u))
+            prevencionista = st.text_input("Prevencionista")
+            c3, c4 = st.columns(2)
+            fecha_inicio = c3.date_input("Fecha inicio", value=date.today())
+            fecha_fin = c4.date_input("Fecha fin", value=date.today())
+            confirmado = st.checkbox("Fecha confirmada")
+            if st.form_submit_button("Crear proyecto", type="primary") and nombre:
+                if fecha_fin < fecha_inicio:
+                    st.error("La fecha fin no puede ser antes que la de inicio.")
+                else:
+                    usuario = st.session_state["usuario"]
+                    proyecto_id = db.crear_proyecto(nombre, cliente, pm, prevencionista, usuario)
+                    db.crear_servicio(proyecto_id, nombre, fecha_inicio.isoformat(),
+                                      fecha_fin.isoformat(), [], confirmado, usuario)
+                    st.success(f"'{nombre}' creado. Ya aparece en el Calendario.")
                     st.rerun()
 
     proyectos = db.listar_proyectos()
@@ -265,7 +359,10 @@ def pantalla_proyectos():
         st.info("Aún no hay proyectos.")
         return
 
-    nombres_opt = {p["id"]: f"🟦 {p['nombre']} — {p['cliente'] or 'sin cliente'}" for p in proyectos}
+    st.divider()
+    st.markdown("### 📋 Proyectos creados")
+    st.caption("Haz clic en un proyecto para ver/editar sus datos y requisitos SST.")
+    nombres_opt = {p["id"]: f"● {p['nombre']} — {p['cliente'] or 'sin cliente'}" for p in proyectos}
     sel = st.selectbox("Ver proyecto", options=list(nombres_opt.keys()), format_func=lambda i: nombres_opt[i])
     _detalle_proyecto(sel, editable, pms)
 

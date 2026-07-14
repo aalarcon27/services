@@ -367,15 +367,21 @@ def obtener_servicio(sid):
     s = _fetchone("SELECT * FROM servicios WHERE id = ?", (sid,))
     if not s:
         return None
-    s["personal_ids"] = [r["personal_id"] for r in
-                         _fetchall("SELECT personal_id FROM servicio_personal WHERE servicio_id = ?", (sid,))]
+    s["personal"] = _fetchall("""
+        SELECT sp.personal_id, pe.nombre AS personal_nombre
+        FROM servicio_personal sp JOIN personal pe ON pe.id = sp.personal_id
+        WHERE sp.servicio_id = ?
+    """, (sid,))
+    s["personal_ids"] = [r["personal_id"] for r in s["personal"]]
     return s
 
 
 def listar_servicios(proyecto_id=None):
     """Servicios con su proyecto (nombre/color) y personal asignado, para armar el calendario."""
     sql = """
-        SELECT s.*, p.nombre AS proyecto_nombre, p.color AS proyecto_color
+        SELECT s.*, p.nombre AS proyecto_nombre, p.color AS proyecto_color,
+               p.cliente AS cliente, p.pm_usuario AS pm_usuario,
+               p.prevencionista AS prevencionista
         FROM servicios s JOIN proyectos p ON p.id = s.proyecto_id
     """
     params = ()

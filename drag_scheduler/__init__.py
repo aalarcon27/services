@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Componente Streamlit a la medida (sin build/npm): un calendario donde se
-arrastra personal desde una lista hasta un dia para agendarlo.
+Componente Streamlit a la medida (sin build/npm): un calendario grande
+que muestra TODOS los proyectos como barras de colores, con una lista
+de personal a la izquierda que se arrastra encima de la barra de un
+proyecto para asignarlo.
 Es un componente "estatico" (protocolo postMessage a mano, sin React).
 """
 import os
@@ -11,16 +13,17 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _component_func = components.declare_component("drag_scheduler", path=_DIR)
 
 
-def drag_scheduler(personal, eventos, color="#4C6EF5", fecha_inicial=None, key=None):
+def drag_scheduler(personal, proyectos, fecha_inicial=None, key=None):
     """
     personal: lista de {"id": int, "nombre": str}
-    eventos: lista de {"id": str, "title": str, "start": "YYYY-MM-DD",
-                        "end": "YYYY-MM-DD" (exclusivo)}
-    color: color del proyecto/servicio actual (se usa para los chips y eventos)
-    Devuelve un dict con la ultima accion del usuario (o None), con un "ts"
-    que cambia en cada accion para que Streamlit detecte el cambio:
-      {"accion": "asignar", "personId": ..., "fecha": "YYYY-MM-DD", "ts": ...}
-      {"accion": "mover", "eventId": ..., "fecha": "YYYY-MM-DD", "ts": ...}
+    proyectos: lista de {"id": int, "label": str, "start": "YYYY-MM-DD",
+                         "end": "YYYY-MM-DD" (exclusivo), "color": "#RRGGBB"}
+    Devuelve un dict con la ultima accion del usuario (o None):
+      {"accion": "asignar", "personId": ..., "projectId": ..., "ts": ...}
+      {"accion": "mover_proyecto", "projectId": ..., "start": "YYYY-MM-DD",
+       "endExcl": "YYYY-MM-DD", "ts": ...}
+      {"accion": "click_proyecto", "projectId": ..., "ts": ...}
+      {"accion": "sin_proyecto", "ts": ...}  (soltaron a alguien fuera de una barra)
     """
-    return _component_func(personal=personal, eventos=eventos, color=color,
+    return _component_func(personal=personal, proyectos=proyectos,
                            fechaInicial=fecha_inicial, key=key, default=None)

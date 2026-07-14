@@ -7,17 +7,16 @@
   body {
     margin: 0; padding: 14px;
     font-family: -apple-system, "Segoe UI", Arial, sans-serif;
-    font-size: 15px; color: #22303f;
-    background: transparent;
+    font-size: 15px; color: #22303f; background: transparent;
   }
   #app { display: flex; gap: 20px; align-items: flex-start; }
-  #personal-panel { flex: 0 0 190px; min-width: 170px; }
+  #personal-panel { flex: 0 0 200px; min-width: 180px; }
   #personal-panel h4 {
     margin: 0 0 10px 0; font-size: 13px; letter-spacing: .04em;
     text-transform: uppercase; color: #7b8794; font-weight: 700;
   }
   .person-chip {
-    background: #4C6EF5; color: #fff; padding: 12px 14px; border-radius: 14px;
+    background: #495057; color: #fff; padding: 12px 14px; border-radius: 14px;
     margin-bottom: 10px; cursor: grab; font-size: 14px; font-weight: 600;
     user-select: none; box-shadow: 0 3px 8px rgba(0,0,0,0.18);
     transition: transform .12s ease, box-shadow .12s ease;
@@ -29,17 +28,14 @@
     font-size: 12.5px; color: #7b8794; margin-top: 10px; line-height: 1.5;
     background: #f4f6fb; padding: 10px 12px; border-radius: 10px;
   }
-
-  /* --- look and feel del calendario: mas redondeado, mas suave --- */
   .fc {
     border-radius: 18px; overflow: hidden; box-shadow: 0 4px 18px rgba(30,41,59,0.10);
     border: 1px solid #e8ecf3;
   }
-  .fc .fc-toolbar-title { font-size: 1.35em; font-weight: 800; color: #22303f; }
+  .fc .fc-toolbar-title { font-size: 1.4em; font-weight: 800; color: #22303f; }
   .fc .fc-button {
     background: #eef1f8; border: none; color: #3c4a5e; border-radius: 10px !important;
-    text-transform: capitalize; font-weight: 600; box-shadow: none !important;
-    padding: 6px 14px;
+    text-transform: capitalize; font-weight: 600; box-shadow: none !important; padding: 6px 14px;
   }
   .fc .fc-button:hover { background: #dfe4f0; }
   .fc .fc-button-primary:not(:disabled).fc-button-active,
@@ -60,7 +56,7 @@
     padding: 3px 8px !important; font-weight: 600; font-size: 12.5px;
     box-shadow: 0 2px 5px rgba(0,0,0,0.15);
   }
-  .fc-daygrid-event { margin-top: 3px !important; }
+  .fc-daygrid-event { margin-top: 3px !important; white-space: normal; }
 </style>
 </head>
 <body>
@@ -68,7 +64,7 @@
   <div id="personal-panel">
     <h4>Personal</h4>
     <div id="personal-list"></div>
-    <div id="hint">👉 Arrastra un nombre a un día para asignarlo. Arrastra un evento ya puesto para cambiarlo de fecha.</div>
+    <div id="hint">👉 Arrastra un nombre <b>encima de la barra de un proyecto</b> para asignarlo.<br>Arrastra la barra de un proyecto para cambiar sus fechas.<br>Haz clic en un proyecto para ver/editar.</div>
   </div>
   <div id="calendar-panel">
     <div id="calendar"></div>
@@ -86,66 +82,87 @@ function setComponentValue(value) { sendToStreamlit("streamlit:setComponentValue
 
 var calendarInstance = null;
 var draggableInstance = null;
-var colorActual = "#4C6EF5";
 
 function render(args) {
-  colorActual = args.color || "#4C6EF5";
-
   var personalDiv = document.getElementById("personal-list");
   personalDiv.innerHTML = "";
   (args.personal || []).forEach(function (p) {
     var chip = document.createElement("div");
     chip.className = "person-chip";
     chip.setAttribute("data-id", p.id);
-    chip.style.backgroundColor = colorActual;
     chip.innerText = p.nombre;
     personalDiv.appendChild(chip);
   });
 
-  if (draggableInstance) {
-    draggableInstance.destroy();
-  }
+  if (draggableInstance) draggableInstance.destroy();
   draggableInstance = new FullCalendar.Draggable(personalDiv, {
     itemSelector: ".person-chip",
     eventData: function (el) {
-      return {
-        title: el.innerText,
-        extendedProps: { personId: parseInt(el.getAttribute("data-id"), 10) },
-      };
+      return { title: el.innerText, extendedProps: { personId: parseInt(el.getAttribute("data-id"), 10) } };
     },
   });
 
   var calendarEl = document.getElementById("calendar");
-  if (calendarInstance) {
-    calendarInstance.destroy();
-  }
+  if (calendarInstance) calendarInstance.destroy();
+
+  var eventos = (args.proyectos || []).map(function (p) {
+    return {
+      id: "proj_" + p.id,
+      title: p.label,
+      start: p.start,
+      end: p.end,          // exclusivo
+      backgroundColor: p.color,
+      borderColor: p.color,
+      extendedProps: { projectId: p.id },
+    };
+  });
+
   calendarInstance = new FullCalendar.Calendar(calendarEl, {
     initialView: "dayGridMonth",
     initialDate: args.fechaInicial || undefined,
-    height: 780,
+    height: 820,
     droppable: true,
     editable: true,
-    dayMaxEvents: 3,
+    eventStartEditable: true,
+    eventDurationEditable: false,
+    dayMaxEvents: false,
     headerToolbar: { left: "prev,next today", center: "title", right: "dayGridMonth,timeGridWeek" },
-    events: (args.eventos || []).map(function (e) {
-      return Object.assign({}, e, {
-        backgroundColor: e.color || colorActual,
-        borderColor: e.color || colorActual,
-      });
-    }),
-    eventReceive: function (info) {
-      var personId = info.event.extendedProps.personId;
-      var fecha = info.event.startStr.slice(0, 10);
-      info.event.remove();
-      setComponentValue({ accion: "asignar", personId: personId, fecha: fecha, ts: Date.now() });
+    events: eventos,
+    eventDidMount: function (info) {
+      if (info.event.extendedProps.projectId != null) {
+        info.el.setAttribute("data-project-id", info.event.extendedProps.projectId);
+      }
     },
+    drop: function (info) {
+      var personId = parseInt(info.draggedEl.getAttribute("data-id"), 10);
+      var x = info.jsEvent.clientX, y = info.jsEvent.clientY;
+      var projectId = null;
+      var els = calendarEl.querySelectorAll(".fc-event[data-project-id]");
+      els.forEach(function (el) {
+        var r = el.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top - 10 && y <= r.bottom + 10) {
+          projectId = parseInt(el.getAttribute("data-project-id"), 10);
+        }
+      });
+      if (projectId != null) {
+        setComponentValue({ accion: "asignar", personId: personId, projectId: projectId, ts: Date.now() });
+      } else {
+        setComponentValue({ accion: "sin_proyecto", ts: Date.now() });
+      }
+    },
+    eventReceive: function (info) { info.event.remove(); },  // no dejar evento fantasma
     eventDrop: function (info) {
-      var fecha = info.event.startStr.slice(0, 10);
-      setComponentValue({ accion: "mover", eventId: info.event.id, fecha: fecha, ts: Date.now() });
+      var pid = info.event.extendedProps.projectId;
+      var start = info.event.startStr.slice(0, 10);
+      var end = info.event.endStr ? info.event.endStr.slice(0, 10) : "";
+      setComponentValue({ accion: "mover_proyecto", projectId: pid, start: start, endExcl: end, ts: Date.now() });
+    },
+    eventClick: function (info) {
+      setComponentValue({ accion: "click_proyecto", projectId: info.event.extendedProps.projectId, ts: Date.now() });
     },
   });
   calendarInstance.render();
-  setFrameHeight(830);
+  setFrameHeight(870);
 }
 
 window.addEventListener("message", function (event) {
@@ -154,7 +171,7 @@ window.addEventListener("message", function (event) {
 });
 
 sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
-setFrameHeight(830);
+setFrameHeight(870);
 </script>
 </body>
 </html>
