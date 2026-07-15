@@ -158,7 +158,8 @@ def init_db():
             confirmado      BOOLEAN DEFAULT FALSE,
             creado_por      TEXT,
             modificado_por  TEXT,
-            modificado_en   TEXT
+            modificado_en   TEXT,
+            estado          TEXT DEFAULT 'en_ejecucion'
         )
     """)
     cur.execute("""
@@ -168,6 +169,14 @@ def init_db():
             PRIMARY KEY (servicio_id, personal_id)
         )
     """)
+    # Migracion: agregar columna 'estado' si la tabla ya existia sin ella
+    if _MODO == "postgres":
+        cur.execute("ALTER TABLE servicios ADD COLUMN IF NOT EXISTS estado TEXT DEFAULT 'en_ejecucion'")
+    else:
+        cur.execute("PRAGMA table_info(servicios)")
+        cols = [fila["name"] for fila in cur.fetchall()]
+        if "estado" not in cols:
+            cur.execute("ALTER TABLE servicios ADD COLUMN estado TEXT DEFAULT 'en_ejecucion'")
     con.commit(); cur.close(); con.close()
 
 
@@ -356,6 +365,10 @@ def actualizar_servicio(sid, nombre, fecha_inicio, fecha_fin, personal_ids, conf
     _ejecutar("DELETE FROM servicio_personal WHERE servicio_id = ?", (sid,))
     for pid in personal_ids:
         _ejecutar("INSERT INTO servicio_personal (servicio_id, personal_id) VALUES (?,?)", (sid, pid))
+
+
+def actualizar_estado(sid, estado):
+    _ejecutar("UPDATE servicios SET estado = ? WHERE id = ?", (estado, sid))
 
 
 def eliminar_servicio(sid):

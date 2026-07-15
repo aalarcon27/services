@@ -23,6 +23,17 @@ ROL_ADMIN = "admin"
 ROLES_EDITOR = ("admin", "editor")
 ROL_VISOR = "visor"
 
+# Estados de un proyecto y su circulito de color
+ESTADOS = {
+    "en_ejecucion": ("🟡", "En ejecución"),
+    "terminado": ("🟢", "Terminado"),
+    "atrasado": ("🔴", "Atrasado"),
+}
+
+
+def _estado_de(servicio):
+    return servicio.get("estado") or "en_ejecucion"
+
 
 # ===================================================================
 # LOGIN
@@ -104,7 +115,8 @@ def _formulario_servicio(proyecto_id, servicio=None, prefill_fechas=None, key_su
 # CALENDARIO — un solo calendario grande con TODOS los proyectos
 # ===================================================================
 def _etiqueta_proyecto(servicio, pm_nombre):
-    # Cliente primero, luego el proyecto, luego PM / prevencionista / personal.
+    # Circulito de estado, luego cliente, proyecto, PM / prevencionista / personal.
+    circulo = ESTADOS[_estado_de(servicio)][0]
     partes = []
     if servicio.get("cliente"):
         partes.append(servicio["cliente"])
@@ -115,7 +127,7 @@ def _etiqueta_proyecto(servicio, pm_nombre):
     asignados = ", ".join(p["personal_nombre"] for p in servicio.get("personal", []))
     if asignados:
         partes.append(f"👷 {asignados}")
-    return "  ·  ".join(partes)
+    return f"{circulo} " + "  ·  ".join(partes)
 
 
 def _panel_editar_proyecto(sid, pms, editable):
@@ -133,6 +145,22 @@ def _panel_editar_proyecto(sid, pms, editable):
     if ct2.button("✖ Cerrar", key=f"cerrar_top_{sid}", type="primary"):
         st.session_state["editar_proyecto_sid"] = None
         st.rerun()
+
+    # ---- Estado del proyecto (circulito de color) ----
+    estado_actual = _estado_de(s)
+    claves_estado = list(ESTADOS.keys())
+    if editable:
+        nuevo_estado = st.radio(
+            "Estado", options=claves_estado,
+            index=claves_estado.index(estado_actual) if estado_actual in claves_estado else 0,
+            format_func=lambda k: f"{ESTADOS[k][0]} {ESTADOS[k][1]}",
+            horizontal=True, key=f"estado_{sid}")
+        if nuevo_estado != estado_actual:
+            db.actualizar_estado(sid, nuevo_estado)
+            st.rerun()
+    else:
+        circ, txt = ESTADOS[estado_actual]
+        st.write(f"**Estado:** {circ} {txt}")
 
     if not editable:
         pm_nombre = next((x["nombre"] for x in pms if x["usuario"] == proyecto["pm_usuario"]), proyecto["pm_usuario"])
